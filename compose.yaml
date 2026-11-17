@@ -1,0 +1,42 @@
+# The Ultimaker 3 adapter. Start: docker compose up -d --build --wait
+# Settings come from .env (see .env.example).
+name: pleiades-ultimaker-adapter
+
+services:
+  ultimaker-adapter:
+    image: pleiades-ultimaker-adapter:${ADAPTER_VERSION:-dev}
+    build: .
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    # A broker on this computer is host.docker.internal; this gives Docker Engine on Linux the name.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Docker cannot use the local resolver stub of systemd-resolved (127.0.0.53) and falls back to
+    # public DNS, which does not know LAN names such as *.internal. DNS_SERVER names the LAN's DNS.
+    dns:
+      - ${DNS_SERVER:-8.8.8.8}
+    ports:
+      - "127.0.0.1:${ADAPTER_PORT:-5530}:8080"
+    environment:
+      PRINTER_URL: ${PRINTER_URL:-http://192.168.100.27}
+      SERIAL_NUMBER: ${SERIAL_NUMBER:-UM3-01}
+      MQTT_URL: ${MQTT_URL:-mqtt://host.docker.internal:1883}
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-5}
+      HEARTBEAT_INTERVAL_SECONDS: ${HEARTBEAT_INTERVAL_SECONDS:-10}
+      REPUBLISH_SECONDS: ${REPUBLISH_SECONDS:-60}
+
+  # A stand-in printer for trying the adapter without one:
+  #   docker compose --profile mock up -d --build   and set PRINTER_URL=http://mock-printer:8081
+  mock-printer:
+    image: node:24.11-alpine3.22
+    profiles: [mock]
+    working_dir: /app
+    volumes:
+      - ./test/mock-printer.ts:/app/mock-printer.ts:ro
+    command: ["node", "mock-printer.ts", "8081"]
+    ports:
+      - "127.0.0.1:8081:8081"
