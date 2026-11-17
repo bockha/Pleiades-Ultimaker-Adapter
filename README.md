@@ -135,3 +135,16 @@ geändert.
 - `materials/{GUID}` liefert unter Firmware 5 das XML als JSON-String. Beide Formen werden gelesen.
 - Nicht publiziert: `heads[].jerk` (bei Ultimaker eine Geschwindigkeit, kein Ruck im Sinne des Binding),
   Netznamen (SSIDs), Kamera, das Systemprotokoll und das gesamte Material-XML.
+
+## Smart Factory Host (SFH)
+
+Der Adapter ist als SFH-App 129 („Pleiades - Ultimaker 3 Adapter“) veröffentlicht.
+
+- `app-definition.json`: AppDefinition 1.2.1, ein Container mit `/health` als Readiness- und Liveness-Probe,
+  ohne Reverse Proxy.
+- Values, pro Deployment überschreibbar: `printerUrl`, `serialNumber`, `mqttUrl`, `pollIntervalSeconds`.
+- `appversion-0.1.0.json`: das daraus erzeugte AppVersionDto der Version 0.1.0 (versionId 5156).
+- Image: `core.harbor.smartfactoryhost.com/secondary-maroon-stingray-129/ultimaker-adapter:<semver>`,
+  gebaut mit `docker build --platform linux/amd64`.
+- Das SFH muss Drucker und Broker erreichen. Kennt sein DNS den Namen des Brokers nicht, setze `mqttUrl`
+  beim Deploy auf die IP-Adresse.

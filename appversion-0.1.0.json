@@ -1,0 +1,98 @@
+{
+  "semver": "0.1.0",
+  "changelog": "Erste Version: publiziert Betriebsdaten, Zustände und Alarme eines Ultimaker 3 nach dem MQTT-Binding des Pleiades Playground.",
+  "definition": {
+    "definitionVersion": "1.2.1",
+    "values": [
+      {
+        "name": "printerUrl",
+        "value": "http://192.168.100.27"
+      },
+      {
+        "name": "serialNumber",
+        "value": "Dave"
+      },
+      {
+        "name": "mqttUrl",
+        "value": "mqtt://vm01.hub0000.ums.internal:1883"
+      },
+      {
+        "name": "pollIntervalSeconds",
+        "value": "5"
+      }
+    ],
+    "containers": [
+      {
+        "name": "ultimaker-adapter",
+        "image": "ultimaker-adapter",
+        "tag": "0.1.0",
+        "resources": {
+          "requests": {
+            "memory": "128Mi",
+            "cpu": "10m"
+          },
+          "limits": {
+            "memory": "128Mi"
+          }
+        },
+        "ports": [
+          {
+            "name": "health",
+            "containerPort": 8080
+          }
+        ],
+        "environment": [
+          {
+            "name": "PRINTER_URL",
+            "value": "{{ .Values.app.printerUrl }}"
+          },
+          {
+            "name": "SERIAL_NUMBER",
+            "value": "{{ .Values.app.serialNumber }}"
+          },
+          {
+            "name": "MQTT_URL",
+            "value": "{{ .Values.app.mqttUrl }}"
+          },
+          {
+            "name": "MQTT_CLIENT_ID",
+            "value": "ultimaker-adapter-{{ .Values.app.serialNumber }}-{{ .Values.sfhId }}"
+          },
+          {
+            "name": "POLL_INTERVAL_SECONDS",
+            "value": "{{ .Values.app.pollIntervalSeconds }}"
+          },
+          {
+            "name": "HEARTBEAT_INTERVAL_SECONDS",
+            "value": "10"
+          },
+          {
+            "name": "REPUBLISH_SECONDS",
+            "value": "60"
+          },
+          {
+            "name": "PORT",
+            "value": "8080"
+          }
+        ],
+        "readinessProbe": {
+          "httpGet": {
+            "path": "/health",
+            "port": 8080
+          },
+          "initialDelaySeconds": 5,
+          "periodSeconds": 10
+        },
+        "livenessProbe": {
+          "httpGet": {
+            "path": "/health",
+            "port": 8080
+          },
+          "initialDelaySeconds": 30,
+          "periodSeconds": 10,
+          "failureThreshold": 12
+        }
+      }
+    ]
+  }
+}
