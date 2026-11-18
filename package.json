@@ -1,8 +1,8 @@
 {
   "name": "pleiades-ultimaker-adapter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Publishes the operating data of an Ultimaker 3 to the MQTT broker of the Pleiades Playground.",
+  "description": "Publishes the operating data of an Ultimaker 3 to the MQTT broker of the Pleiades Playground, by the umati data model 0.17.1.",
   "type": "module",
   "engines": { "node": ">=22.18" },
   "scripts": {

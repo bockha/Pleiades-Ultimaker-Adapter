@@ -3,20 +3,27 @@
 export type Config = {
   /** Base URL of the printer's local API, without a trailing slash. */
   printerUrl: string
-  /** The machine id in every topic: machines/{SerialNumber}/... */
+  /** Identification.SerialNumber; with the model it forms the machine id ultimaker_<model>_<serial>. */
   serialNumber: string
+  /** Identification.Model. */
+  model: string
+  /** Identification.ProductInstanceUri; empty for https://ultimaker.com/<model>/<serial>. */
+  productInstanceUri: string | undefined
   mqttUrl: string
   mqttUser: string | undefined
   mqttPassword: string | undefined
-  mqttClientId: string
+  /** Empty for ultimaker-adapter-<machine id>. */
+  mqttClientId: string | undefined
   pollIntervalMs: number
   heartbeatIntervalMs: number
-  /** An unchanged value is sent again after this time, so a reader always finds a recent one. */
-  republishMs: number
   httpTimeoutMs: number
   /** Port of the liveness endpoint /health. */
   port: number
 }
+
+/** Who makes the printer, as Identification.Manufacturer and ManufacturerUri say. */
+export const MANUFACTURER = "Ultimaker"
+export const MANUFACTURER_URI = "https://ultimaker.com"
 
 function seconds(name: string, usual: number, env: NodeJS.ProcessEnv): number {
   const raw = env[name]
@@ -27,18 +34,17 @@ function seconds(name: string, usual: number, env: NodeJS.ProcessEnv): number {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const serialNumber = env.SERIAL_NUMBER?.trim() || "UM3"
-  if (/[/+#]/.test(serialNumber)) throw new Error("SERIAL_NUMBER must not contain '/', '+' or '#'")
   return {
     printerUrl: (env.PRINTER_URL?.trim() || "http://192.168.100.27").replace(/\/+$/, ""),
-    serialNumber,
+    serialNumber: env.SERIAL_NUMBER?.trim() || "UM3-01",
+    model: env.MODEL?.trim() || "UM3",
+    productInstanceUri: env.PRODUCT_INSTANCE_URI?.trim() || undefined,
     mqttUrl: env.MQTT_URL?.trim() || "mqtt://localhost:1883",
     mqttUser: env.MQTT_USER || undefined,
     mqttPassword: env.MQTT_PASSWORD || undefined,
-    mqttClientId: env.MQTT_CLIENT_ID?.trim() || `ultimaker-adapter-${serialNumber}`,
+    mqttClientId: env.MQTT_CLIENT_ID?.trim() || undefined,
     pollIntervalMs: seconds("POLL_INTERVAL_SECONDS", 5, env),
     heartbeatIntervalMs: seconds("HEARTBEAT_INTERVAL_SECONDS", 10, env),
-    republishMs: seconds("REPUBLISH_SECONDS", 60, env),
     httpTimeoutMs: seconds("HTTP_TIMEOUT_SECONDS", 4, env),
     port: Number(env.PORT || 8080),
   }

@@ -2,6 +2,14 @@
 
 Stand: 2026-11-17, 22:35 MEZ. Repository: `Pleiades-Ultimaker-Adapter`, Branch `master`, nicht gepusht.
 
+> **Nachtrag 2026-11-18:** Seit dem Breaking Change auf Playground-`main` (PR #82, umati-Datenmodell 0.17.1) liest
+> der Stack nur noch den neuen Baum. Der Adapter ist ab Version 0.2.0 darauf umgestellt: Dave heißt jetzt
+> `machines/ultimaker_UM3_Dave/`, `vendor/` ist `oem/Ultimaker/…`, der Zustand ist der Snapshot `umati/State/Status`,
+> Alarme sind `umati/Notification/ActiveAlerts` plus CloudEvents. Abschnitt 2 ist aktualisiert. In Abschnitt 3
+> und 4 gilt jedes `machines/Dave/` und `vendor/…` sinngemäß für den neuen Baum. Der Issue-Entwurf für die
+> `vendor/`-Topics (`docs/issue-draft.md`) ist überholt. Der Playground bringt mit #148 eine eigene
+> Ultimaker-Telemetrie mit; deren Signale liegen auf denselben `oem/Ultimaker/…`-Pfaden.
+
 ## 1. Was steht
 
 Ein Adapter (TypeScript auf Node.js, MQTT 5) liest die lokale API des Ultimaker 3 „Dave“
@@ -20,32 +28,33 @@ Commits: `3a92f44` (Adapter), `e7f179d` (SFH-Paket, gehärtetes Image), dazu die
 
 ## 2. Was Dave publiziert (die Grundlage für eine Kachel)
 
-Alle Topics liegen unter `machines/Dave/`. Zahlen sind in SI-Einheiten, also Temperaturen in `degreeCelsius`,
-Längen in `metre`, Zeiten in `second` und Anteile in `one` (1.0 = 100 %).
+Alle Topics liegen unter `machines/ultimaker_UM3_Dave/` (Datenmodell 0.17.1). Zahlen tragen die Einheit des
+Katalogs: Temperaturen in `degreeCelsius`, Längen in `metre`, Zeiten in `second`, Anteile in `one` (1.0 = 100 %).
+Alles ist retained, ein Wert geht bei Änderung raus.
 
-**Liest das Dashboard schon heute:** `umati/Connection/State`, `umati/Connection/Heartbeat`,
-`umati/State/MachineryItemState`, `umati/State/MachineryOperationMode`, `umati/Production/ActiveProgram`.
+**Liest der Stack schon heute:** `umati/Connection/State`, `umati/Connection/Heartbeat`, `umati/State/Status`
+(Snapshot mit `MachineryItemState` und `MachineryOperationMode`), `umati/Notification/ActiveAlerts` und die Events
+auf `events/notifications`.
 
-**Neu und druckerspezifisch, von keiner Karte gezeigt** (der Kern einer Drucker-Kachel):
+**Druckerspezifisch** (der Kern einer Drucker-Kachel, alles unter `oem/Ultimaker/`):
 
 | Was | Topic | Art |
 |---|---|---|
-| Druckerstatus | `vendor/Printer/Status` | `idle`, `printing`, `error`, `maintenance`, `booting` |
-| Job-Zustand | `vendor/PrintJob/State` | `none`, `pre_print`, `printing`, `paused`, `wait_cleanup`, … |
-| Fortschritt | `vendor/PrintJob/Progress` | one (0..1) |
-| Restzeit, Laufzeit, Gesamtzeit | `vendor/PrintJob/TimeRemaining`, `TimeElapsed`, `TimeTotal` | second |
-| Jobname | `umati/Production/ActiveProgram` | string |
-| Betttemperatur Ist / Soll | `vendor/Bed/Temperature`, `vendor/Bed/TargetTemperature` | degreeCelsius |
-| Düse 1/2 Ist / Soll | `vendor/Head/1/Extruder/{1,2}/Hotend/Temperature`, `…/TargetTemperature` | degreeCelsius |
-| Druckkern | `vendor/Head/1/Extruder/{1,2}/Hotend/Id` | z. B. `AA 0.4` |
-| Material | `vendor/Head/1/Extruder/{1,2}/Material/Type`, `…/Color`, `…/ColorCode` | z. B. `PLA`, `Yellow`, `#f9a800` |
-| Filament-Rest | `vendor/Head/1/Extruder/{1,2}/Material/LengthRemaining` | metre (fehlt, wenn unbekannt) |
-| Lebensdauer Druckkern | `…/Hotend/MaterialExtruded` (metre), `…/Hotend/TimeSpentHot` (second) | |
-| Alarme / Meldungen | `machines/Dave/events/notifications` | `printer-error` (Error), `printer-maintenance`, `job-wait-user-action` (Warning), `job-paused`, `job-wait-cleanup`, `log-*` (Information) |
+| Druckerstatus | `oem/Ultimaker/PrinterStatus` | `idle`, `printing`, `error`, `maintenance`, `booting` |
+| Job-Zustand | `oem/Ultimaker/Print/State` | `none`, `pre_print`, `printing`, `paused`, `wait_cleanup`, … |
+| Fortschritt | `oem/Ultimaker/Print/Progress` | one (0..1) |
+| Restzeit, Laufzeit, Gesamtzeit | `oem/Ultimaker/Print/TimeRemaining`, `TimeElapsed`, `TimeTotal` | second |
+| Jobname | `oem/Ultimaker/Print/Name` | string |
+| Betttemperatur Ist / Soll | `oem/Ultimaker/Bed/Temperature`, `…/TargetTemperature` | degreeCelsius |
+| Düse 0/1 Ist / Soll | `oem/Ultimaker/Extruder/{0,1}/Temperature`, `…/TargetTemperature` | degreeCelsius |
+| Druckkern | `oem/Ultimaker/Extruder/{0,1}/HotendId` | z. B. `AA 0.4` |
+| Material | `oem/Ultimaker/Extruder/{0,1}/MaterialType`, `…/MaterialColor`, `…/MaterialColorCode` | z. B. `PLA`, `Yellow`, `#f9a800` |
+| Filament-Rest | `oem/Ultimaker/Extruder/{0,1}/MaterialRemainingLength` | metre (fehlt, wenn unbekannt) |
+| Alarme | `umati/Notification/ActiveAlerts`, Events auf `events/notifications` | `printer-error` (`Failure`), `printer-maintenance`, `job-wait-user-action` (`CheckFunction`); `NotificationEvent` für `job-wait-cleanup` und das Ereignisprotokoll |
 
-Werte werden bei Änderung gesendet, unverändert spätestens nach 60 s. Temperaturen ändern sich praktisch bei jeder
-Abfrage, also alle 5 s. Extruder 2 hat derzeit kein Material: `Material/Guid` ist leer, `Type`, `Color` und
-`LengthRemaining` fehlen. Eine Kachel muss das abfangen.
+Extruder zählen jetzt ab 0, wie beim Drucker und in der Ultimaker-Telemetrie des Playground. Extruder 1 hat derzeit
+kein Material: Typ, Farbe und Restlänge fehlen (nach dem Entladen einmal `null`). Eine Kachel muss das abfangen.
+Das Manifest `umati/Manifest` nennt jedes Signal mit Typ, Einheit und Beschreibung.
 
 ## 3. Vorschlag: eine Drucker-Kachel in Pleiades
 
@@ -92,7 +101,7 @@ node .claude/skills/build-your-own/show-card.mjs genui_printer_show machine=Dave
 ```
 
 Eine Zahl der Antwort mit der Timeseries API vergleichen, z. B.
-`GET /timeseries/baseUnitValues/topics/machines/Dave/vendor/Bed/Temperature?startTime=…&stopTime=…`.
+`machines/ultimaker_UM3_Dave/oem/Ultimaker/Bed/Temperature` über die Timeseries API (Endpunkte siehe `contracts/openapi`).
 
 ### Testdaten für Zustände, die Dave gerade nicht hat
 

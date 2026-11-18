@@ -1,3 +1,6 @@
+> **Überholt (2026-11-18):** Mit dem Datenmodell 0.17.1 auf Playground-`main` (#82) gibt es `vendor/` nicht mehr;
+> herstellereigene Signale liegen unter `oem/`. Der Adapter publiziert ab 0.2.0 unter `oem/Ultimaker/…`.
+
 # Entwurf: Issue für united-machining-solutions/Pleiades.Playground
 
 > Nur ein Entwurf. Er wird erst geöffnet, wenn du ausdrücklich zustimmst (`gh issue create`).

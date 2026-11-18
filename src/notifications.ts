@@ -1,123 +1,82 @@
-// Alarms and messages of the printer as notification events of the Events API
-// (NotificationEventDtoV1, content type notificationeventdtov1). A condition is raised when it
-// begins and reset when it ends, both with the same correlation id.
+// Alarms and messages of the printer as the data model has them: conditions that last are alerts of
+// Notification.ActiveAlerts with the events Notification.AlertRaised and Notification.AlertCleared;
+// a message that does not stay is a Notification.NotificationEvent, an alert without Severity.
+// The list goes out before the events that change it. Severity is the category of NAMUR NE 107; which
+// condition gets which is an assumption of this adapter.
 
-import { randomBytes } from "node:crypto"
+import { randomUUID } from "node:crypto"
 
+import { timestampOf } from "./binding.ts"
+import type { Json } from "./binding.ts"
 import type { HistoryEvent } from "./ultimaker.ts"
 
-export type Level = "Information" | "Warning" | "Error"
+export const ALERT_RAISED = "Notification.AlertRaised"
+export const ALERT_CLEARED = "Notification.AlertCleared"
+export const NOTIFICATION_EVENT = "Notification.NotificationEvent"
+export const EVENTS: ReadonlyArray<string> = [ALERT_RAISED, ALERT_CLEARED, NOTIFICATION_EVENT]
 
-export type NotificationEvent = {
-  timestamp: string
-  id: string
-  mId: string
-  level: Level
-  action: "Raised" | "Reset"
-  title: string
-  localizedTitle: string
-  notificationId: string
-  correlationId: string
-}
+export type Severity = "Failure" | "CheckFunction" | "OffSpec" | "MaintenanceRequired"
+export type Alert = { [key: string]: Json } & { Id: string; ErrorCode: string; Message: string; Time: string; Severity?: Severity }
+/** An event of the group Notification, before it becomes a CloudEvent. */
+export type NotificationOut = { type: string; data: Alert; time: Date }
 
-/** A MongoDB ObjectId in hex: the Events API stores the id as one. */
-export function objectId(now = new Date()): string {
-  const seconds = Math.floor(now.getTime() / 1000).toString(16).padStart(8, "0")
-  return seconds + randomBytes(8).toString("hex")
-}
-
-type Condition = { notificationId: string; level: Level; title: string; holds: (status: string, jobState?: string) => boolean }
+type Condition = { code: string; severity: Severity; message: string; holds: (status: string, jobState?: string) => boolean }
 
 /** Conditions that last, derived from the state of the printer and its job. */
 export const CONDITIONS: ReadonlyArray<Condition> = [
-  {
-    notificationId: "printer-error",
-    level: "Error",
-    title: "Printer reports an error",
-    holds: (status) => status === "error",
-  },
-  {
-    notificationId: "printer-maintenance",
-    level: "Warning",
-    title: "Printer is in maintenance",
-    holds: (status) => status === "maintenance",
-  },
-  {
-    notificationId: "job-wait-user-action",
-    level: "Warning",
-    title: "Print job waits for a user action",
-    holds: (_, job) => job === "wait_user_action",
-  },
-  {
-    notificationId: "job-paused",
-    level: "Information",
-    title: "Print job paused",
-    holds: (_, job) => job === "pausing" || job === "paused",
-  },
-  {
-    notificationId: "job-wait-cleanup",
-    level: "Information",
-    title: "Print finished, remove the print from the build plate",
-    holds: (_, job) => job === "wait_cleanup",
-  },
+  { code: "printer-error", severity: "Failure", message: "Printer reports an error", holds: (status) => status === "error" },
+  { code: "printer-maintenance", severity: "CheckFunction", message: "Printer is in maintenance", holds: (status) => status === "maintenance" },
+  { code: "job-wait-user-action", severity: "CheckFunction", message: "Print job waits for a user action", holds: (_, job) => job === "wait_user_action" },
 ]
 
-export class NotificationTracker {
-  private readonly mId: string
-  /** Correlation id of every condition that is raised now. */
-  private readonly open = new Map<string, string>()
-  private seenEvents: Set<string> | null = null
+/** A message that comes once when the job enters a state. */
+const MESSAGES: ReadonlyArray<{ code: string; message: string; jobState: string }> = [
+  { code: "job-wait-cleanup", message: "Print finished, remove the print from the build plate", jobState: "wait_cleanup" },
+]
 
-  constructor(mId: string) {
-    this.mId = mId
+export class AlertTracker {
+  private readonly active = new Map<string, Alert>()
+  private lastJobState: string | undefined
+  private seenLog: Set<string> | null = null
+
+  /** The whole list of Notification.ActiveAlerts, [] for none. */
+  list(): Array<Alert> {
+    return [...this.active.values()].map((a) => ({ ...a }))
   }
 
-  private event(level: Level, action: "Raised" | "Reset", notificationId: string, title: string, correlationId: string, at: Date): NotificationEvent {
-    return {
-      timestamp: at.toISOString(),
-      id: objectId(at),
-      mId: this.mId,
-      level,
-      action,
-      title,
-      localizedTitle: title,
-      notificationId,
-      correlationId,
-    }
-  }
-
-  /** The events for the conditions that began or ended since the last call. */
-  update(status: string, jobState: string | undefined, at: Date): Array<NotificationEvent> {
-    const out: Array<NotificationEvent> = []
+  /** The events for the conditions that began or ended, and the messages of a job state just reached. */
+  update(status: string, jobState: string | undefined, at: Date): Array<NotificationOut> {
+    const out: Array<NotificationOut> = []
     for (const c of CONDITIONS) {
       const holds = c.holds(status, jobState)
-      const correlationId = this.open.get(c.notificationId)
-      if (holds && correlationId === undefined) {
-        const id = objectId(at)
-        this.open.set(c.notificationId, id)
-        out.push(this.event(c.level, "Raised", c.notificationId, c.title, id, at))
-      } else if (!holds && correlationId !== undefined) {
-        this.open.delete(c.notificationId)
-        out.push(this.event(c.level, "Reset", c.notificationId, c.title, correlationId, at))
+      const standing = this.active.get(c.code)
+      if (holds && !standing) {
+        const alert: Alert = { Id: randomUUID(), ErrorCode: c.code, Message: c.message, Severity: c.severity, Time: timestampOf(at) }
+        this.active.set(c.code, alert)
+        out.push({ type: ALERT_RAISED, data: { ...alert }, time: at })
+      } else if (!holds && standing) {
+        this.active.delete(c.code)
+        out.push({ type: ALERT_CLEARED, data: { ...standing }, time: at })
       }
+    }
+    if (jobState !== this.lastJobState) {
+      for (const m of MESSAGES) {
+        if (m.jobState === jobState) out.push({ type: NOTIFICATION_EVENT, data: { Id: randomUUID(), ErrorCode: m.code, Message: m.message, Time: timestampOf(at) }, time: at })
+      }
+      this.lastJobState = jobState
     }
     return out
   }
 
-  /** Resets every open condition, for example when the printer can no longer be reached. */
-  resetAll(at: Date): Array<NotificationEvent> {
-    return this.update("", undefined, at)
-  }
-
   /**
-   * New entries of the printer's event log, each a message of level Information that is raised
-   * once. The entries present at the first call are history and are not sent.
+   * New entries of the printer's event log, each a NotificationEvent. The entries present at the
+   * first call are history and are not sent.
    */
-  fromLog(events: ReadonlyArray<HistoryEvent>, now: Date): Array<NotificationEvent> {
+  fromLog(events: ReadonlyArray<HistoryEvent>, now: Date): Array<NotificationOut> {
     const key = (e: HistoryEvent) => `${e.time ?? ""}|${e.type_id ?? ""}|${e.message ?? ""}`
-    const first = this.seenEvents === null
-    const seen = (this.seenEvents ??= new Set())
-    const out: Array<NotificationEvent> = []
+    const first = this.seenLog === null
+    const seen = (this.seenLog ??= new Set())
+    const out: Array<NotificationOut> = []
     for (const e of events) {
       if (typeof e?.message !== "string" || e.message === "") continue
       const k = key(e)
@@ -125,11 +84,11 @@ export class NotificationTracker {
       seen.add(k)
       if (first) continue
       const at = parseLogTime(e.time, now)
-      out.push(this.event("Information", "Raised", `log-${e.type_id ?? "unknown"}`, e.message, objectId(at), at))
+      out.push({ type: NOTIFICATION_EVENT, data: { Id: randomUUID(), ErrorCode: String(e.type_id ?? "unknown"), Message: e.message, Time: timestampOf(at) }, time: at })
     }
     // Keep the set small: only the keys of the entries the printer still returns.
-    if (seen.size > 500) this.seenEvents = new Set(events.map(key))
-    return out.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    if (seen.size > 500) this.seenLog = new Set(events.map(key))
+    return out.sort((a, b) => a.time.getTime() - b.time.getTime())
   }
 }
 
